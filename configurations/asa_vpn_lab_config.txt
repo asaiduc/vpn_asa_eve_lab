@@ -1,0 +1,334 @@
+##########################################
+# CẤU HÌNH CHI TIẾT LAB ASA & VPN       #
+# Mô hình: BR - ISP - GW1/GW2 - CORE - ASA - SVR
+##########################################
+
+##########################################
+# 1. ROUTER BR
+##########################################
+! Giao diện và IP
+interface e0/0
+ ip address 103.1.1.254 255.255.255.0
+ no shutdown
+interface e0/1
+ ip address 10.1.1.254 255.255.255.0
+ no shutdown
+
+! DHCP Server
+ip dhcp pool LAN-BR
+ network 10.1.1.0 255.255.255.0
+ default-router 10.1.1.254
+ dns-server 8.8.8.8
+
+! Static route để BR reach IP public của GW1 và GW2
+ip route 102.1.1.254 255.255.255.255 103.1.1.1
+ip route 101.1.1.254 255.255.255.255 103.1.1.1
+
+! OSPF
+router ospf 1
+ network 10.1.1.0 0.0.0.255 area 0
+ network 10.0.0.0 0.0.0.3 area 0
+ network 10.0.1.0 0.0.0.3 area 0  
+
+! TUNNEL10 (VPN chính đến GW1)
+interface Tunnel10
+ ip address 10.0.0.2 255.255.255.252
+ tunnel source 103.1.1.254
+ tunnel destination 102.1.1.254
+ tunnel mode ipsec ipv4
+ tunnel protection ipsec profile MYPROFILE
+ ip ospf cost 10
+
+! TUNNEL20 (VPN dự phòng đến GW2)
+interface Tunnel20
+ ip address 10.0.1.2 255.255.255.252
+ tunnel source 103.1.1.254
+ tunnel destination 101.1.1.254
+ tunnel mode ipsec ipv4
+ tunnel protection ipsec profile MYPROFILE2
+ ip ospf cost 100
+
+! IPSEC
+crypto isakmp policy 10
+ authentication pre-share
+ encryption aes
+ hash sha
+ group 2
+crypto isakmp key VPNKEY address 102.1.1.254
+crypto isakmp key VPNKEY2 address 101.1.1.254
+
+crypto ipsec transform-set MYSET esp-aes esp-sha-hmac
+ mode tunnel
+crypto ipsec profile MYPROFILE
+ set transform-set MYSET
+crypto ipsec profile MYPROFILE2
+ set transform-set MYSET
+
+##########################################
+# 2. ROUTER ISP
+##########################################
+interface e0/0
+ ip address 103.1.1.1 255.255.255.0
+interface e0/1
+ ip address 102.1.1.1 255.255.255.0
+interface e0/2
+ ip address 101.1.1.1 255.255.255.0
+
+! Static route để định tuyến VPN
+ip route 10.0.0.0 255.255.255.252 102.1.1.254
+ip route 10.0.1.0 255.255.255.252 101.1.1.254
+
+##########################################
+# 3. ROUTER GW1
+##########################################
+interface e0/0
+ ip address 102.1.1.254 255.255.255.0
+interface e0/1
+ ip address 172.17.2.254 255.255.255.0
+
+! Static route để GW1 reach BR public
+ip route 103.1.1.0 255.255.255.0 102.1.1.1
+
+ip route 172.16.2.0 255.255.255.0 172.16.1.1
+
+
+! Tunnel10
+interface Tunnel10
+ ip address 10.0.0.1 255.255.255.252
+ tunnel source 102.1.1.254
+ tunnel destination 103.1.1.254
+ tunnel mode ipsec ipv4
+ tunnel protection ipsec profile MYPROFILE
+ ip ospf cost 10
+
+! IPSEC
+crypto isakmp policy 10
+ authentication pre-share
+ encryption aes
+ hash sha
+ group 2
+crypto isakmp key VPNKEY address 103.1.1.254
+crypto ipsec transform-set MYSET esp-aes esp-sha-hmac
+ mode tunnel
+crypto ipsec profile MYPROFILE
+ set transform-set MYSET
+
+router ospf 1
+ network 172.17.2.0 0.0.0.255 area 0
+ network 10.0.0.0 0.0.0.3 area 0
+
+##########################################
+# 4. ROUTER GW2
+##########################################
+interface e0/0
+ ip address 101.1.1.254 255.255.255.0
+interface e0/1
+ ip address 172.17.1.254 255.255.255.0
+
+! Static route để GW2 reach BR public
+ip route 103.1.1.0 255.255.255.0 101.1.1.1
+
+ip route 172.16.2.0 255.255.255.0 172.16.1.1
+
+interface Tunnel20
+ ip address 10.0.1.1 255.255.255.252
+ tunnel source 101.1.1.254
+ tunnel destination 103.1.1.254
+ tunnel mode ipsec ipv4
+ tunnel protection ipsec profile MYPROFILE2
+ ip ospf cost 100
+
+crypto isakmp policy 10
+ authentication pre-share
+ encryption aes
+ hash sha
+ group 2
+crypto isakmp key VPNKEY2 address 103.1.1.254
+crypto ipsec transform-set MYSET esp-aes esp-sha-hmac
+ mode tunnel
+crypto ipsec profile MYPROFILE2
+ set transform-set MYSET
+
+router ospf 1
+ network 172.17.1.0 0.0.0.255 area 0
+ network 10.0.1.0 0.0.0.3 area 0
+
+##########################################
+# 5. ROUTER CORE1
+##########################################
+interface e0/0
+ ip address 172.17.2.1 255.255.255.0
+interface e0/1
+ ip address 172.17.1.1 255.255.255.0
+interface e0/2
+ ip address 172.18.0.1 255.255.255.0
+interface e0/3
+ ip address 172.17.0.1 255.255.255.0
+
+! DHCP cho VPC1-C1, VPC2-C1
+ip dhcp pool LAN-C1
+ network 172.17.0.0 255.255.255.0
+ default-router 172.17.0.1
+ dns-server 8.8.8.8
+
+router ospf 1
+ network 10.0.0.0 0.0.0.3 area 0
+ network 10.0.1.0 0.0.0.3 area 0
+ network 172.16.0.0 0.0.255.255 area 0
+ network 172.17.0.0 0.0.255.255 area 0
+ network 172.18.0.0 0.0.0.255 area 0
+
+ip route 172.16.2.0 255.255.255.0 172.16.1.1
+
+##########################################
+# 6. ROUTER CORE2
+##########################################
+interface e0/0
+ ip address 172.18.0.254 255.255.255.0
+interface e0/1
+ ip address 172.16.1.254 255.255.255.0
+interface e0/2
+ ip address 172.16.0.254 255.255.255.0
+
+! DHCP cho VPC1-C2, VPC2-C2
+ip dhcp pool LAN-C2
+ network 172.16.0.0 255.255.255.0
+ default-router 172.16.0.254
+ dns-server 8.8.8.8
+
+router ospf 1
+ network 172.16.0.0 0.0.0.255 area 0
+ network 172.16.1.0 0.0.0.255 area 0
+ network 172.18.0.0 0.0.0.255 area 0
+
+ip route 172.16.2.0 255.255.255.0 172.16.1.1
+
+##########################################
+# 7. ASA (CLI dạng cơ bản)
+##########################################
+interface Ethernet0
+ nameif outside
+ security-level 0
+ ip address 192.168.1.10 255.255.255.0
+ no shutdown
+
+interface Ethernet1
+ nameif dmz
+ security-level 50
+ ip address 172.16.2.1 255.255.255.0
+ no shutdown
+
+interface Ethernet2
+ nameif inside
+ security-level 100
+ ip address 172.16.1.1 255.255.255.0
+ no shutdown
+
+! Static routes từ ASA về mạng nội bộ và default gateway để ra internet
+route outside 0.0.0.0 0.0.0.0 192.168.1.1
+route inside 10.1.1.0 255.255.255.0 172.16.1.254
+route inside 172.17.0.0 255.255.0.0 172.16.1.254
+route inside 172.16.0.0 255.255.255.0 172.16.1.254
+route inside 172.18.0.0 255.255.255.0 172.16.1.254
+
+! Định nghĩa object network để NAT hoạt động
+object network VPNPOOL
+ subnet 192.168.100.0 255.255.255.0
+
+object network DMZPOOL
+ subnet 172.16.2.0 255.255.255.0
+
+! NAT + ACL
+access-list INSIDE extended permit ip 172.18.0.0 255.255.255.0 172.16.2.0 255.255.255.0
+access-list INSIDE extended permit ip 172.17.0.0 255.255.0.0 172.16.2.0 255.255.255.0
+access-list INSIDE extended permit ip 172.16.0.0 255.255.255.0 172.16.2.0 255.255.255.0
+access-list INSIDE extended permit ip 10.1.1.0 255.255.255.0 172.16.2.0 255.255.255.0 
+access-list INSIDE extended permit ip 10.0.0.0 255.255.255.252 172.16.2.0 255.255.255.0 
+access-list INSIDE extended permit ip 10.0.1.0 255.255.255.252 172.16.2.0 255.255.255.0 
+
+access-group INSIDE in interface inside
+
+! AnyConnect VPN cấu hình
+! 1. Tạo pool địa chỉ cấp cho VPN client
+ip local pool VPNPOOL 192.168.100.10-192.168.100.50 mask 255.255.255.0
+
+! 2. Tạo user để xác thực VPN
+username vpnuser password 123456 privilege 15
+username vpnuser attributes
+ service-type remote-access
+
+! 3. Tạo group-policy
+group-policy ANYCONNECT_POLICY internal
+group-policy ANYCONNECT_POLICY attributes
+ vpn-tunnel-protocol ssl-client ssl-clientless
+ split-tunnel-policy tunnelspecified
+ split-tunnel-network-list value SPLIT-TUNNEL-LIST
+ dns-server value 8.8.8.8
+ address-pools value VPNPOOL
+
+! 4. Tạo ACL cho Split Tunnel
+access-list SPLIT-TUNNEL-LIST standard permit 172.16.2.0 255.255.255.0
+
+! 5. Tạo tunnel-group cho AnyConnect VPN
+tunnel-group ANYCONNECT type remote-access
+tunnel-group ANYCONNECT general-attributes
+ default-group-policy ANYCONNECT_POLICY
+ address-pool VPNPOOL
+ authentication-server-group LOCAL
+tunnel-group ANYCONNECT webvpn-attributes
+ group-alias RemoteVPN enable
+
+! 6. Bật webvpn và kích hoạt AnyConnect
+webvpn
+ enable outside
+ svc enable
+ anyconnect-essentials
+ anyconnect image disk0:/anyconnect-win-4.5.04029-webdeploy-k9.pkg 1
+ anyconnect enable
+ tunnel-group-list enable
+
+! 7. NAT cho VPN client truy cập DMZ
+nat (outside,outside) source dynamic VPNPOOL interface
+nat (inside,dmz) source static any any destination static DMZPOOL DMZPOOL no-proxy-arp
+
+! 8. Gán ACL cho VPN truy cập DMZ nếu cần
+access-list OUTSIDE extended permit ip 192.168.100.0 255.255.255.0 172.16.2.0 255.255.255.0
+access-group OUTSIDE in interface outside
+
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 192.168.100.0 255.255.255.0 
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 172.16.0.0 255.255.0.0 
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 172.17.0.0 255.255.0.0 
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 172.18.0.0 255.255.255.0 
+access-list DMZ extended permit icmp 172.16.2.0 255.255.255.0 172.16.1.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 172.16.2.0 255.255.255.0 172.17.0.0 255.255.0.0 echo-reply 
+access-list DMZ extended permit icmp 172.16.2.0 255.255.255.0 172.18.0.0 255.255.0.0 echo-reply 
+access-list DMZ extended permit icmp 172.16.2.0 255.255.255.0 172.16.0.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 172.16.1.0 255.255.255.0 172.16.2.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 172.17.0.0 255.255.0.0 172.16.2.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 172.18.0.0 255.255.255.0 172.16.2.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 192.168.100.0 255.255.255.0 172.16.2.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 172.16.0.0 255.255.255.0 172.16.2.0 255.255.255.0 echo-reply
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 10.1.1.0 255.255.255.0 
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 10.0.0.0 255.255.255.252 
+access-list DMZ extended permit ip 172.16.2.0 255.255.255.0 10.0.1.0 255.255.255.252 
+access-list DMZ extended permit icmp 172.16.2.0 255.255.255.0 10.0.0.0 255.255.255.252 echo-reply 
+access-list DMZ extended permit icmp 172.16.2.0 255.255.255.0 10.0.1.0 255.255.255.252 echo-reply 
+access-list DMZ extended permit icmp 10.0.0.0 255.255.255.252 172.16.2.0 255.255.255.0 echo-reply 
+access-list DMZ extended permit icmp 10.0.1.0 255.255.255.252 172.16.2.0 255.255.255.0 echo-reply 
+access-group DMZ in interface dmz
+
+! 9. HTTP Server
+ssl encryption aes256-sha1
+http server enable
+http 192.168.1.0 255.255.255.0 outside
+
+! 10. Cho phép ICMP
+policy-map global_policy
+ class inspection_default
+  inspect icmp
+
+##########################################
+# 8. SVR
+##########################################
+IP: 172.16.2.100/24
+Gateway: 172.16.2.1
